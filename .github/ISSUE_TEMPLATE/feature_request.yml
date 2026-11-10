@@ -1,0 +1,16 @@
+name: Feature Request
+description: Suggest an improvement to endstone_spawnprotect
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case on your server.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Commands, permissions or config you would expect.

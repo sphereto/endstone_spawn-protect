@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog entry
+    # Source changes need a CHANGELOG.md entry, because release notes are built from it.
+    # Apply the "skip-changelog" label to a PR that has no user-facing change.
+    if: >-
+      github.event_name == 'pull_request'
+      && github.actor != 'dependabot[bot]'
+      && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require a changelog entry for source changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          if echo "$changed" | grep -qE '^src/' && ! echo "$changed" | grep -qx 'CHANGELOG.md'; then
+            echo "::error::Source files changed but CHANGELOG.md has no entry. Add one under [Unreleased], or apply the 'skip-changelog' label."
+            exit 1
+          fi
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install
+        run: uv sync --extra dev
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.10", "3.11", "3.12", "3.13", "3.14" ]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: uv sync --extra dev
+
+      - name: Run tests
+        run: uv run pytest
+
+  build:
+    name: Build wheel
+    needs: [ lint, test ]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build
+        run: uv build
+
+      # Every run uploads the wheel, so any branch can be tried on a test server.
+      - name: Upload wheel
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel
+          retention-days: 14
+          path: dist/*.whl

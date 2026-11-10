@@ -1,0 +1,44 @@
+name: Endstone update check
+
+# Opens an issue when a newer Endstone release line exists than the API version this plugin targets.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Compare the targeted API version with the latest Endstone release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(sed -n 's/.*api_version = "\([0-9.]*\)".*/\1/p' src/*/plugin.py | head -1)
+          latest_tag=$(gh api repos/EndstoneMC/endstone/releases/latest --jq .tag_name)
+          latest=$(echo "$latest_tag" | sed -E 's/^v([0-9]+\.[0-9]+).*/\1/')
+          echo "targeted=$current latest=$latest ($latest_tag)"
+          if [ -z "$current" ] || [ -z "$latest" ]; then
+            echo "::error::Could not read the targeted or the latest Endstone version"
+            exit 1
+          fi
+          newest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)
+          if [ "$current" = "$latest" ] || [ "$newest" != "$latest" ]; then
+            echo "Up to date."
+            exit 0
+          fi
+          title="Update Endstone to $latest"
+          if gh issue list --label endstone-update --state all --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "Issue already exists."
+            exit 0
+          fi
+          gh label create endstone-update --color 0E8A16 --description "New Endstone release" --force
+          gh issue create --label endstone-update --title "$title" \
+            --body "Endstone $latest_tag is available and this plugin targets API $current. Read the Endstone changelog, bump \`api_version\` in \`plugin.py\`, fix any breakage, and add a CHANGELOG entry."

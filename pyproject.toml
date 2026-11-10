@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "endstone-spawnprotect"
+# The version comes from the git tag (hatch-vcs); the Release workflow creates the tag.
+dynamic = ["version"]
+dependencies = ["typing_extensions>=4.0"]
+authors = [
+    { name = "sphereto", email = "placeholder@example.com" },
+]
+description = "Spawn protection for Endstone: blocks mob spawns, PvP and block changes while doors and chests keep working."
+readme = "README.md"
+license = { file = "LICENSE" }
+keywords = ["endstone", "plugin", "minecraft", "bedrock"]
+requires-python = ">=3.10"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.optional-dependencies]
+dev = ["endstone", "ruff", "pytest"]
+
+[project.urls]
+Homepage = "https://github.com/sphereto/endstone_spawn-protect"
+Documentation = "https://endstone.dev/latest/"
+Changelog = "https://github.com/sphereto/endstone_spawn-protect/blob/main/CHANGELOG.md"
+Issues = "https://github.com/sphereto/endstone_spawn-protect/issues"
+
+[project.entry-points."endstone"]
+spawnprotect = "endstone_spawnprotect:SpawnprotectPlugin"
+
+[tool.ruff]
+line-length = 120
+# Recent ruff versions also format code blocks inside Markdown; the docs contain API pseudo-code.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["I", "E", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.version]
+source = "vcs"
+raw-options = { fallback_version = "0.0.0" }
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/endstone_spawnprotect/_version.py"

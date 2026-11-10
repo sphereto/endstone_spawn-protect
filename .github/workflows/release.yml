@@ -1,0 +1,187 @@
+name: Release
+
+# One-click release: Actions -> Release -> Run workflow -> enter a version such as 0.2.0.
+# Tick "dry run" first to preview the release notes without changing anything.
+#
+# Order matters: CI must pass BEFORE the tag is created, so a failing build can never leave
+# a half-published release behind. The package version is read from the git tag (hatch-vcs).
+#
+# PyPI publishing is opt-in: set the repository variable PUBLISH_TO_PYPI to "true" and configure a
+# trusted publisher on PyPI for this workflow and the "pypi" environment.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.2.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Preview without making changes"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Run the release from the main branch."
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format: $VERSION (expected X.Y.Z)"
+            exit 1
+          fi
+          if git tag -l "v$VERSION" | grep -q .; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+
+      - name: Extract unreleased changelog
+        run: |
+          BODY=$(sed -n '/^## \[Unreleased\]/,/^## \[/{/^## \[/d; p}' CHANGELOG.md)
+          BODY=$(echo "$BODY" | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba}')
+          if [ -z "$BODY" ]; then
+            echo "::error::The [Unreleased] section of CHANGELOG.md is empty"
+            exit 1
+          fi
+          echo "$BODY" > /tmp/release_body.md
+
+      - name: Preview (dry run)
+        if: inputs.dry_run
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "=== Dry run ==="
+          echo "Version: $VERSION  (tag v$VERSION, $(date -u +%Y-%m-%d))"
+          echo "=== Release notes ==="
+          cat /tmp/release_body.md
+
+  ci:
+    name: CI gate
+    needs: [ verify ]
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Tag and publish
+    needs: [ ci ]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Extract unreleased changelog
+        run: |
+          BODY=$(sed -n '/^## \[Unreleased\]/,/^## \[/{/^## \[/d; p}' CHANGELOG.md)
+          BODY=$(echo "$BODY" | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba}')
+          echo "$BODY" > /tmp/release_body.md
+
+      - name: Update CHANGELOG.md
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
+
+      - name: Commit and tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "Release $VERSION"
+          git tag "v$VERSION"
+
+      - name: Push
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git push origin main
+          git push origin "v$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            printf '\n**Full Changelog**: https://github.com/%s/compare/%s...v%s\n' \
+              "${{ github.repository }}" "$PREV_TAG" "$VERSION" >> /tmp/release_body.md
+          fi
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file /tmp/release_body.md
+
+  build:
+    name: Build and attach wheel
+    needs: [ release ]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build
+        run: uv build
+
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum *.whl > SHA256SUMS.txt
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ inputs.version }}" dist/*.whl dist/SHA256SUMS.txt --clobber
+
+      - name: Keep dist for publishing
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          retention-days: 7
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    needs: [ build ]
+    if: ${{ vars.PUBLISH_TO_PYPI == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

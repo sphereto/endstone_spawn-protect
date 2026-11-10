@@ -1,0 +1,22 @@
+# Spawn protection settings. Each protection can be switched off on its own.
+
+# Cancel block breaking and placing inside the protected area.
+# Doors, chests, buttons and other interactions are never touched.
+protect_blocks = true
+
+# Cancel player-versus-player damage inside the protected area.
+protect_pvp = true
+
+# Cancel mob spawning inside the protected area (players, items and projectiles are not affected).
+protect_mobs = true
+
+# "world" protects the whole dimension below. "radius" protects a square around (center_x, center_z).
+area = "radius"
+
+# Name of the protected dimension, as the server reports it (for example "Overworld").
+dimension = "Overworld"
+
+# Used when area = "radius": half the side length of the protected square, in blocks.
+center_x = 0
+center_z = 0
+radius = 64
